@@ -328,6 +328,7 @@ Respond strictly in valid JSON format:
     def withdraw_bounty(self, beneficiary: Address) -> u256:
         """
         Whitehat claims their awarded bounty payment.
+        Transfers the native GEN value to the beneficiary via _Beneficiary emit_transfer.
         """
         sender = gl.message.sender_address
         assert sender == beneficiary, "Unauthorized: caller can only withdraw their own claimable bounty"
@@ -336,6 +337,7 @@ Respond strictly in valid JSON format:
         assert balance > 0, "No claimable bounty available for withdrawal"
         
         self.claimable_balances[str(beneficiary)] = 0
+        _Beneficiary(beneficiary).emit_transfer(value=balance)
         return balance
 
     @gl.public.view
