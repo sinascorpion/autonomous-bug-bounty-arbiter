@@ -85,7 +85,7 @@ class AutonomousBugBountyArbiter(gl.Contract):
         attached_value = gl.message.value
         
         assert bounty_pool_amount > 0, "Bounty pool amount must exceed zero"
-        assert attached_value >= bounty_pool_amount, f"Attached value {attached_value} is less than required bounty {bounty_pool_amount}"
+        assert attached_value == bounty_pool_amount, "Attached value must equal the bounty pool amount"
         assert len(project_name.strip()) > 0, "Project identifier required"
         assert target_source_url.strip().startswith("https://"), "Target source code URL must use HTTPS"
         assert len(scope_specification.strip()) > 0, "Bounty scope specifications required"
@@ -162,6 +162,7 @@ class AutonomousBugBountyArbiter(gl.Contract):
         target_code_url = self.target_source_urls.get(b_key, "")
         scope = self.scope_specifications.get(b_key, "")
         pool_available = self.locked_bounty_pools.get(b_key, 0)
+        assert pool_available > 0, "Bounty pool is depleted"
         whitehat = self.whitehats.get(r_key)
         
         vuln_title = self.vulnerability_titles.get(r_key, "")
@@ -182,7 +183,10 @@ class AutonomousBugBountyArbiter(gl.Contract):
                     raw_code = gl.nondet.web.render(captured_url, mode="text")
                     acquired_source = raw_code[:4000].strip()
                 except Exception as e:
-                    acquired_source = f"CODE_FETCH_FAILED: {str(e)}"
+                    raise gl.UserError("Target source fetch failed")
+
+            if not acquired_source:
+                raise gl.UserError("Target source is empty")
 
             prompt = f"""You are an autonomous AI Smart Contract Security Triager and Vulnerability Arbiter on GenLayer.
 Evaluate the submitted vulnerability disclosure against the project's bounty scope and the ACTUAL CONTRACT-ACQUIRED TARGET SOURCE CODE.
@@ -222,7 +226,7 @@ Respond strictly in valid JSON format:
             if not isinstance(res, dict):
                 raise gl.UserError(f"LLM returned invalid format: {type(res)}")
             
-            res["acquired_code_snippet"] = acquired_source[:200]
+            res["acquired_code"] = acquired_source
             return res
 
         def validator_fn(leader_result) -> bool:
@@ -252,7 +256,10 @@ Respond strictly in valid JSON format:
                         raw_code = gl.nondet.web.render(captured_url, mode="text")
                         val_acquired = raw_code[:4000].strip()
                     except Exception as e:
-                        val_acquired = f"CODE_FETCH_FAILED: {str(e)}"
+                        return False
+
+                if not val_acquired or val_acquired != str(lead_data.get("acquired_code", "")):
+                    return False
 
                 val_prompt = f"""You are an autonomous AI Smart Contract Security Triager and Vulnerability Arbiter on GenLayer.
 Evaluate the submitted vulnerability disclosure against the project's bounty scope and the ACTUAL CONTRACT-ACQUIRED TARGET SOURCE CODE.
@@ -295,7 +302,7 @@ Respond strictly in valid JSON format:
         severity = str(triage_res.get("severity", "")).strip().upper()
         confidence = int(triage_res.get("confidence", 85))
         rationale = str(triage_res.get("rationale", "Autonomous security consensus concluded on acquired target code."))
-        code_snippet = str(triage_res.get("acquired_code_snippet", ""))
+        code_snippet = str(triage_res.get("acquired_code", ""))[:200]
         
         self.acquired_code_snippets[r_key] = code_snippet
         self.validator_confidences[r_key] = u8(min(100, max(0, confidence)))
@@ -383,3 +390,4 @@ Respond strictly in valid JSON format:
     @gl.public.view
     def get_total_reports(self) -> u64:
         return self.report_counter
+
