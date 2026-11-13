@@ -4,7 +4,7 @@ An experimental GenLayer Intelligent Contract for funded bounty pools, AI-assist
 
 ## Deployment status
 
-No current Studio-dev deployment of this revision has been verified. Earlier submitted addresses returned “contract not found” on Studio-dev. Do not use those addresses as evidence for this revision. Studio-dev (chain 61997) and Studionet (chain 61999) are separate networks; preview state can be reset. Before submitting evidence, verify the network, deployment transaction, successful execution, contract address, source and matching Explorer page.
+This revision was deployed to Studio-dev (chain ID 61997): [contract 0x2FcD1baC30f871CD18937C7f60f29c6e39d2803A](https://explorer-studio-dev.genlayer.com/address/0x2FcD1baC30f871CD18937C7f60f29c6e39d2803A). The [deployment transaction](https://explorer-studio-dev.genlayer.com/tx/0x14ec634548db13c1313ca1ea03f3841fcfa34528efad3296c33075f835ca7890) shows FINALIZED and SUCCESS in the explorer. Studio-dev and Studionet (chain 61999) are separate networks; preview state can be reset.
 
 ## How it works
 
