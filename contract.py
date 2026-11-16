@@ -425,4 +425,3 @@ Respond strictly in valid JSON format:
     @gl.public.view
     def get_total_reports(self) -> u64:
         return self.report_counter
-
