@@ -1,23 +1,25 @@
 # Autonomous Bug Bounty Arbiter
 
-An experimental GenLayer Intelligent Contract for funded bounty pools, AI-assisted vulnerability triage, and claimable GEN rewards. The source is [contract.py](contract.py).
+An experimental GenLayer Intelligent Contract for sponsor-authorized, single-report bounty pools, AI-assisted triage, and claimable GEN rewards. The deployed source is [contract.py](contract.py).
 
-## Deployment status
+## Deployment
 
-This revision was deployed to Studio-dev (chain ID 61997): [contract 0x2FcD1baC30f871CD18937C7f60f29c6e39d2803A](https://explorer-studio-dev.genlayer.com/address/0x2FcD1baC30f871CD18937C7f60f29c6e39d2803A). The [deployment transaction](https://explorer-studio-dev.genlayer.com/tx/0x14ec634548db13c1313ca1ea03f3841fcfa34528efad3296c33075f835ca7890) shows FINALIZED and SUCCESS in the explorer. Studio-dev and Studionet (chain 61999) are separate networks; preview state can be reset.
+Studio-dev (chain ID 61997): [contract 0x0017f904c9106E4098d4Dc990f65e9e046C6DDCc](https://explorer-studio-dev.genlayer.com/address/0x0017f904c9106E4098d4Dc990f65e9e046C6DDCc). The [deployment transaction](https://explorer-studio-dev.genlayer.com/tx/0xf221bb99959be5e45f489c7ca626ac70cc046999ee39cf110480c33cbaaaca63) was accepted with successful execution. Studio-dev is a test network and may reset.
 
-## How it works
+## Replay protection and use
 
-A sponsor supplies a source URL, scope and exactly the pool amount. A researcher submits a report. The leader and validators fetch and assess the first 4,000 characters of the target source; validation requires the same fetched text and severity. A successful decision allocates a portion of the remaining pool to a claimable balance, and the researcher can call `withdraw_bounty` to request a native GEN transfer.
+Each bounty pool is restricted to one report for its entire lifetime, even after rejection or adjudication. The sponsor creates and funds a pool, calls `authorize_reporter` with the researcher's address, and the authorized researcher submits one report. Before creating a report ID, the contract checks that the pool has no registered report and permanently records the new ID against that pool. Before allocating any award, adjudication checks that the report is the pool's registered report, that its status is pending, and that it has not already received an award. Rewritten titles or proofs cannot obtain a second report or award from the same pool.
 
-Fetch failures and empty evidence abort adjudication. Adjudication also rejects a depleted pool. Excess deposits are rejected rather than retained.
+This is an intentionally restrictive per-pool limit, not a semantic similarity classifier: a second, different vulnerability also needs a separate pool. A sponsor may replace the authorized researcher only before the first submission. The sponsor controls access and can censor researchers. The protection is per pool, not across different pools.
+
+The sponsor can call `close_bounty_pool` to request the return of unallocated funds before submission or after adjudication. Closure is blocked while a report is pending. If adjudication repeatedly fails or never reaches a decision, funds may remain locked indefinitely. Awarded balances remain claimable by the researcher via `withdraw_bounty`.
+
+The leader and validators independently fetch and assess the first 4,000 characters of the target source, and validation requires identical fetched text and matching severity. CRITICAL, HIGH, MEDIUM and LOW allocate respectively 100%, 50%, 20% and 5% of the remaining pool; INVALID allocates nothing.
 
 ## Limitations
 
-This is an experiment, not an audited security system. The LLM evaluates a report; it does not execute the proof of concept or guarantee that a vulnerability is real. Its reported confidence is model output, not a measured percentage of validator agreement. Only the first 4,000 characters are examined, the URL can serve mutable content, and sponsor-defined scope is not independently authenticated. Reports and proofs of concept are public. Duplicate reports can receive multiple awards; there is no sponsor refund or pool closure mechanism. Do not fund with assets you cannot afford to lose.
+This is an unaudited experiment. The LLM does not execute the proof of concept or guarantee exploitability. Its confidence is model output, not a measured percentage of validator agreement. The source URL can change, scope is sponsor-defined, and only the first 4,000 characters are assessed. Reports and proofs are public. Native transfer delivery and the complete lifecycle of this revision have not been independently tested on the network. Do not rely on it to safeguard funds.
 
-The selected payout rates are 100% of the remaining pool for CRITICAL, 50% for HIGH, 20% for MEDIUM and 5% for LOW; INVALID gets no payout.
+## Tests
 
-## Testing and deployment
-
-The current source has received a Python syntax check only; its execution, transfers and complete lifecycle on the target network have not been verified for this revision. Deploy using tooling compatible with the target network, including the required fee distribution for Consensus v0.6. Confirm both consensus and execution results, and verify the exact address on its matching Explorer before submitting. Never commit private keys or credentials.
+Run `python -m unittest test_replay -v` for mock tests covering sponsor authorization, rejected and adjudicated reports, rewritten duplicates, separate pools, and sponsor refund accounting. Mock tests do not prove GenVM consensus, transfers or end-to-end network behavior. Never commit private keys.
