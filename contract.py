@@ -1,4 +1,4 @@
-# v0.3.3
+# v0.4.0
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 from genlayer import *
@@ -13,11 +13,11 @@ class _Beneficiary:
 
 class AutonomousBugBountyArbiter(gl.Contract):
     """
-    Autonomous Bug Bounty & Vulnerability Arbitration Protocol
+    Sponsor-authorized, single-report bounty pools with AI-assisted arbitration.
     
-    A standalone GenLayer Intelligent Contract primitive that provides trustless on-chain
-    bug bounty pools and non-deterministic vulnerability assessment. Eliminates centralized
-    bounty triagers and fee-extracting intermediaries (e.g. Immunefi/HackerOne).
+    Each pool accepts exactly one report, from a researcher authorized by its sponsor.
+    This is a conservative per-pool replay barrier, not semantic deduplication. Sponsors
+    can censor reporters. Create separate pools for independent vulnerabilities.
     
     Grounds adjudication in contract-acquired target source code and authoritative scope evidence
     fetched directly on-chain via `gl.nondet.web.render()` before any severity result can allocate funds.
@@ -48,6 +48,8 @@ class AutonomousBugBountyArbiter(gl.Contract):
     max_bounty_amounts: TreeMap[str, u256]
     locked_bounty_pools: TreeMap[str, u256]
     bounty_active_flags: TreeMap[str, bool]
+    authorized_reporters: TreeMap[str, Address]
+    bounty_report_ids: TreeMap[str, u64]
     
     # Vulnerability Submission & Arbitration State (keys are string report_id)
     report_bounty_ids: TreeMap[str, u64]
@@ -105,6 +107,32 @@ class AutonomousBugBountyArbiter(gl.Contract):
         return b_id
 
     @gl.public.write
+    def authorize_reporter(self, bounty_id: u64, researcher: Address) -> None:
+        """The sponsor selects the one researcher allowed to submit for this pool."""
+        key = str(bounty_id)
+        assert self.bounty_active_flags.get(key, False), "Bounty program is inactive or does not exist"
+        assert self.sponsors.get(key) == gl.message.sender_address, "Only the sponsor may authorize a reporter"
+        assert self.bounty_report_ids.get(key, 0) == 0, "This bounty already has a report"
+        assert researcher != Address("0x0000000000000000000000000000000000000000"), "Invalid researcher"
+        self.authorized_reporters[key] = researcher
+
+    @gl.public.write
+    def close_bounty_pool(self, bounty_id: u64) -> u256:
+        """Return the unallocated pool to its sponsor, never while triage is pending."""
+        key = str(bounty_id)
+        sponsor = gl.message.sender_address
+        assert self.bounty_active_flags.get(key, False), "Bounty program is inactive or does not exist"
+        assert self.sponsors.get(key) == sponsor, "Only the sponsor may close the pool"
+        report_id = self.bounty_report_ids.get(key, 0)
+        assert report_id == 0 or self.report_statuses.get(str(report_id), 255) in (1, 2), "Report is pending triage"
+        balance = self.locked_bounty_pools.get(key, 0)
+        self.bounty_active_flags[key] = False
+        self.locked_bounty_pools[key] = 0
+        if balance > 0:
+            _Beneficiary(sponsor).emit_transfer(value=balance)
+        return balance
+
+    @gl.public.write
     def submit_vulnerability_report(
         self,
         bounty_id: u64,
@@ -119,12 +147,15 @@ class AutonomousBugBountyArbiter(gl.Contract):
         
         assert self.bounty_active_flags.get(b_key, False), "Bounty program is inactive or does not exist"
         assert self.locked_bounty_pools.get(b_key, 0) > 0, "Bounty program funds are fully depleted"
+        assert self.bounty_report_ids.get(b_key, 0) == 0, "This bounty already has a report"
+        assert self.authorized_reporters.get(b_key) == whitehat, "Reporter is not authorized by the sponsor"
         assert len(vuln_title.strip()) > 0, "Vulnerability title required"
         assert len(proof_of_concept.strip()) > 0, "Vulnerability proof-of-concept / exploit reproduction required"
         
         self.report_counter += 1
         r_id = self.report_counter
         r_key = str(r_id)
+        self.bounty_report_ids[b_key] = r_id
         
         self.report_bounty_ids[r_key] = bounty_id
         self.whitehats[r_key] = whitehat
@@ -157,6 +188,7 @@ class AutonomousBugBountyArbiter(gl.Contract):
         
         b_id = self.report_bounty_ids.get(r_key, 0)
         b_key = str(b_id)
+        assert self.bounty_report_ids.get(b_key, 0) == report_id, "Report is not the bounty's registered report"
         
         proj = self.project_names.get(b_key, "")
         target_code_url = self.target_source_urls.get(b_key, "")
@@ -311,6 +343,8 @@ Respond strictly in valid JSON format:
             self.report_statuses[r_key] = 2  # REJECTED_OUT_OF_SCOPE
             self.triage_verdicts[r_key] = f"Report Dismissed ({confidence}% consensus): {rationale}. Zero payout awarded."
         else:
+            assert self.bounty_report_ids.get(b_key, 0) == report_id, "Report is not the bounty's registered report"
+            assert self.awarded_amounts.get(r_key, 0) == 0, "Report already awarded"
             self.report_statuses[r_key] = 1  # ACCEPTED_PAID
             if severity == "CRITICAL":
                 payout = pool_available  # 100% of remaining pool
@@ -359,7 +393,8 @@ Respond strictly in valid JSON format:
             "scope_specification": self.scope_specifications.get(key, ""),
             "max_bounty": str(self.max_bounty_amounts.get(key, 0)),
             "locked_pool": str(self.locked_bounty_pools.get(key, 0)),
-            "is_active": self.bounty_active_flags.get(key, False)
+            "is_active": self.bounty_active_flags.get(key, False),
+            "registered_report_id": self.bounty_report_ids.get(key, 0)
         }
 
     @gl.public.view
